@@ -23,7 +23,7 @@ from flamejob_api.agent import AgentTask, Assign
 from flamejob_api.schemas import JobConfig
 from flamejob_core import TaskState
 
-from . import fairness
+from . import fairness, preempt
 from .config import Config
 from .crypto import Cipher
 from .hub import AgentHub, StatusSink
@@ -175,10 +175,88 @@ class Scheduler:
                 await self._cancel_inflight_for(job_id)
         # 2) Backstop: finalize running jobs whose chunks are all terminal.
         await self._finalize_completed_jobs()
-        # (requeue_orphaned_running + resume_preempted_jobs are deferred: restart
-        #  recovery and preemption/handoff are Phase 2d.)
+        # 3) Restart recovery: re-queue running jobs whose in-memory inputs are gone.
+        await self._requeue_orphaned_running()
+        # 4) Preemption handoff: resume preempt-requeued jobs from their durable
+        #    keyspace offset once their chunks have stopped.
+        await self._resume_preempted_jobs()
         await self._promote_queued_jobs()
         await self._fill_fleet()
+
+    # ---- restart recovery + preemption handoff (Phase 2d) ----
+
+    async def _requeue_orphaned_running(self) -> None:
+        """Re-queue running jobs whose shared inputs are missing from memory (a
+        restart mid-job); ``_promote``/``_launch`` then rebuilds their chunk set."""
+        async with self._pool.acquire() as conn:
+            ids = [
+                r["id"]
+                for r in await conn.fetch(
+                    "SELECT j.id FROM jobs j WHERE j.state = 'running' "
+                    "AND EXISTS (SELECT 1 FROM tasks t WHERE t.job_id = j.id "
+                    "AND t.state IN ('pending','running'))"
+                )
+            ]
+        for job_id in ids:
+            if job_id in self._inputs:
+                continue
+            async with self._pool.acquire() as conn:
+                await conn.execute("UPDATE jobs SET state = 'queued' WHERE id = $1", job_id)
+
+    async def _resume_preempted_jobs(self) -> None:
+        """Resume preempt-requeued jobs that have fully stopped: split each stopped
+        chunk's unfinished keyspace at its last progress offset and re-dispatch the
+        remainder on the (possibly new) pool — the handoff a whole-job restart
+        can't do. Rebuilds inputs WITHOUT re-planning chunks (which would wipe the
+        split), then flips back to running."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT j.id, j.hashlist_id, j.attack_mode, j.config FROM jobs j "
+                "WHERE j.preempt_state = 'requeued' AND j.state = 'paused' "
+                "AND (j.resume_after IS NULL OR j.resume_after <= now()) "
+                "AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.job_id = j.id "
+                "AND t.state = 'running')"
+            )
+        for row in rows:
+            job_id = row["id"]
+            if self._inflight_count_for(job_id) > 0:
+                continue  # an in-flight handle isn't torn down yet; wait a tick
+            async with self._pool.acquire() as conn:
+                tasks = await conn.fetch(
+                    "SELECT id, keyspace_offset, keyspace_len, progress FROM tasks "
+                    "WHERE job_id = $1 AND state = 'paused'",
+                    job_id,
+                )
+            for t in tasks:
+                noff, nlen = preempt.remaining_window(
+                    t["keyspace_offset"], t["keyspace_len"], t["progress"]
+                )
+                if t["keyspace_len"] > 0 and nlen <= 0:
+                    await self._set_task(t["id"], "done")
+                else:
+                    async with self._pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE tasks SET keyspace_offset = $2, keyspace_len = $3, "
+                            "state = 'pending', progress = 0 WHERE id = $1",
+                            t["id"],
+                            noff,
+                            nlen,
+                        )
+            # Rebuild inputs (hash set + keyspace probe) WITHOUT re-planning.
+            try:
+                inputs = await self._prepare_inputs(
+                    job_id, row["hashlist_id"], row["attack_mode"], row["config"]
+                )
+            except Exception:
+                _log.warning("preempt-resume: failed to rebuild inputs", exc_info=True)
+                continue
+            self._inputs[job_id] = inputs
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE jobs SET state = 'running', preempt_state = NULL, "
+                    "est_completion = NULL WHERE id = $1",
+                    job_id,
+                )
 
     # ---- admission ----
 
