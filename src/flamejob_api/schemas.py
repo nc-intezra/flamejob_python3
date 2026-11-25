@@ -52,6 +52,14 @@ class JobCreate(BaseModel):
     config: JobConfig
 
 
+class PatchJob(BaseModel):
+    priority: int
+
+
+class PinRequest(BaseModel):
+    agent_id: UUID
+
+
 class JobView(BaseModel):
     id: UUID
     name: str
