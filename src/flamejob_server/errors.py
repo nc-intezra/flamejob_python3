@@ -31,6 +31,10 @@ class AppError(Exception):
         self.detail = detail
 
 
+class BadRequest(AppError):
+    status, title = 400, "Bad Request"
+
+
 class Unauthorized(AppError):
     status, title = 401, "Unauthorized"
 

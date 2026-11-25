@@ -25,6 +25,7 @@ from .routes_agent import router as agent_router
 from .routes_auth import router as auth_router
 from .routes_files import router as files_router
 from .routes_hashlists import router as hashlists_router
+from .routes_job_writes import router as job_writes_router
 from .routes_jobs import router as jobs_router
 from .routes_telemetry import router as telemetry_router
 
@@ -72,6 +73,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(jobs_router)
+    app.include_router(job_writes_router)
     app.include_router(hashlists_router)
     app.include_router(files_router)
     app.include_router(telemetry_router)
