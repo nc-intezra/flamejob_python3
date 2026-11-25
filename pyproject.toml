@@ -25,6 +25,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "mypy>=1.9",
     "ruff>=0.4",
+    "httpx>=0.27",
     "testcontainers[postgres]>=4.0",
 ]
 
@@ -48,6 +49,17 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency injectors are designed to be called in argument defaults.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Security",
+]
 # S101 (assert) and test-only subprocess/hardcoded-literal lints are fine in
 # tests; keep SQL-injection lint (S608) loud everywhere.
 [tool.ruff.lint.per-file-ignores]
@@ -67,7 +79,7 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 markers = [
     "interop: format-interop proofs against real Rust-generated fixtures",
     "postgres: needs a live Postgres (skipped when FLAMEJOB_TEST_DSN is unset)",

@@ -88,6 +88,11 @@ class Config(BaseSettings):
         extra="ignore",
     )
 
+    # M1 read-shadow mode: when true, suppress benign side-effect writes (e.g. the
+    # API-key last_used stamp) so the Python server can run strictly read-only
+    # alongside Rust. Set via FJ_READ_SHADOW=true.
+    read_shadow: bool = False
+
     server: ServerCfg = Field(default_factory=ServerCfg)
     database: DatabaseCfg = Field(default_factory=DatabaseCfg)
     auth: AuthCfg = Field(default_factory=AuthCfg)

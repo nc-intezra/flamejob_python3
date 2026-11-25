@@ -10,20 +10,14 @@ from __future__ import annotations
 
 import os
 import uuid
-from pathlib import Path
 
 import asyncpg
 import pytest
 
 from flamejob_db import apply, load_migrations
 from flamejob_db.pool import create_pool
-
-_MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
-
-
-def _swap_db(dsn: str, dbname: str) -> str:
-    base, _, _ = dsn.rpartition("/")
-    return f"{base}/{dbname}"
+from helpers import MIGRATIONS_DIR as _MIGRATIONS
+from helpers import swap_db as _swap_db
 
 
 def test_migrations_load_in_order() -> None:
