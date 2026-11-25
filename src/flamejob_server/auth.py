@@ -14,6 +14,7 @@ regardless, since the parameters are read from the string.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -102,3 +103,15 @@ def verify_password(pw: str, phc_hash: str) -> bool:
 def api_key_hash(key: str) -> str:
     """Hex SHA-256 of an API key's full secret — what we store and look up by."""
     return hashlib.sha256(key.encode()).hexdigest()
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Mint a new API key: ``(secret, prefix, hash)``.
+
+    Matches the Rust ``generate_api_key``: ``fj_`` + 20 random bytes as hex; the
+    prefix is the first 10 chars (``fj_`` + 7 hex) stored for display, and the
+    stored hash is :func:`api_key_hash` of the full secret. The secret itself is
+    returned to the caller exactly once and never persisted.
+    """
+    secret = "fj_" + os.urandom(20).hex()
+    return secret, secret[:10], api_key_hash(secret)

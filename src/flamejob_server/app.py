@@ -21,6 +21,7 @@ from .crypto import Cipher, key_from_config
 from .dashboard import dashboard_router
 from .errors import install_error_handlers
 from .hub import AgentHub
+from .routes_admin import router as admin_router
 from .routes_agent import router as agent_router
 from .routes_auth import router as auth_router
 from .routes_files import router as files_router
@@ -72,6 +73,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(jobs_router)
     app.include_router(job_writes_router)
     app.include_router(hashlists_router)
