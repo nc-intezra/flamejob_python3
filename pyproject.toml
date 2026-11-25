@@ -79,7 +79,7 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 markers = [
     "interop: format-interop proofs against real Rust-generated fixtures",
     "postgres: needs a live Postgres (skipped when FLAMEJOB_TEST_DSN is unset)",

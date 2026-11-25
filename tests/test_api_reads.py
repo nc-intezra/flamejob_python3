@@ -15,13 +15,14 @@ from collections.abc import AsyncIterator
 import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
-from tests.test_migrations import _MIGRATIONS, _swap_db
 
 from flamejob_core import Role
 from flamejob_db import apply
 from flamejob_server.app import create_app
 from flamejob_server.auth import api_key_hash, issue_token
 from flamejob_server.config import AuthCfg, Config, DatabaseCfg, SchedulerCfg
+from helpers import MIGRATIONS_DIR as _MIGRATIONS
+from helpers import swap_db as _swap_db
 
 pytestmark = pytest.mark.postgres
 
