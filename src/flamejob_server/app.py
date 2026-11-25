@@ -17,8 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from flamejob_db import create_pool
 
 from .config import Config
+from .crypto import Cipher, key_from_config
 from .dashboard import dashboard_router
 from .errors import install_error_handlers
+from .hub import AgentHub
+from .routes_agent import router as agent_router
 from .routes_auth import router as auth_router
 from .routes_files import router as files_router
 from .routes_hashlists import router as hashlists_router
@@ -48,6 +51,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app = FastAPI(title="flamejob", version=_version(), lifespan=lifespan)
     app.state.cfg = cfg
+    # The singular control-plane brain + the data-at-rest cipher live on app state.
+    app.state.hub = AgentHub()
+    app.state.cipher = Cipher(key_from_config(cfg))
 
     origins = cfg.web.allowed_origins or ["*"]
     app.add_middleware(
@@ -69,6 +75,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     app.include_router(hashlists_router)
     app.include_router(files_router)
     app.include_router(telemetry_router)
+    app.include_router(agent_router)
     app.include_router(dashboard_router(cfg))
     return app
 
