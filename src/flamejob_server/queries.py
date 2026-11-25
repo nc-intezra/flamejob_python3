@@ -6,14 +6,28 @@
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from uuid import UUID
 
 import asyncpg
 
-from flamejob_api.schemas import ApiKeyView, JobHistoryView, JobView, TaskView
+from flamejob_api.schemas import (
+    ApiKeyView,
+    CrackedHash,
+    DeviceSample,
+    DeviceView,
+    FileView,
+    HashlistView,
+    JobHistoryView,
+    JobView,
+    StorageUsageView,
+    TaskView,
+)
 from flamejob_core import JobState, Role, TaskState
 
 from .config import Config
+from .crypto import Cipher
 
 # Verbatim port of routes.rs JOB_SELECT, with explicit column aliases so rows
 # can be read by name (the Rust tuple form relies on position). No user input.
@@ -187,3 +201,157 @@ async def lookup_api_key(conn: asyncpg.Connection, key_hash: str) -> asyncpg.Rec
 
 async def stamp_api_key_used(conn: asyncpg.Connection, key_hash: str) -> None:
     await conn.execute("UPDATE api_keys SET last_used_at = now() WHERE key_hash = $1", key_hash)
+
+
+# ---- hashlists + cracked (P1-06) ----
+
+
+async def list_hashlists(conn: asyncpg.Connection) -> list[HashlistView]:
+    rows = await conn.fetch(
+        "SELECT id, name, hash_type, total, cracked, created_at "
+        "FROM hashlists ORDER BY created_at DESC"
+    )
+    return [
+        HashlistView(
+            id=r["id"],
+            name=r["name"],
+            hash_type=r["hash_type"],
+            total=r["total"],
+            cracked=r["cracked"],
+        )
+        for r in rows
+    ]
+
+
+async def list_cracked(
+    conn: asyncpg.Connection, cipher: Cipher, hashlist_id: UUID
+) -> list[CrackedHash]:
+    rows = await conn.fetch(
+        "SELECT hash, salt, plain FROM hashes WHERE hashlist_id = $1 AND plain IS NOT NULL",
+        hashlist_id,
+    )
+    out: list[CrackedHash] = []
+    for r in rows:
+        blob = r["plain"]
+        plain = ""
+        if blob is not None:
+            dec = cipher.decrypt(bytes(blob))
+            if dec is not None:
+                try:
+                    plain = dec.decode("utf-8")
+                except UnicodeDecodeError:
+                    plain = ""
+        out.append(CrackedHash(hash=r["hash"], salt=r["salt"], plain=plain))
+    return out
+
+
+# ---- files + storage usage (P1-07) ----
+
+
+async def list_files(conn: asyncpg.Connection) -> list[FileView]:
+    rows = await conn.fetch(
+        "SELECT id, name, kind::text AS kind, size_bytes, sha256 "
+        "FROM files ORDER BY created_at DESC"
+    )
+    return [
+        FileView(
+            id=r["id"],
+            name=r["name"],
+            kind=r["kind"],
+            size_bytes=r["size_bytes"],
+            sha256=r["sha256"],
+        )
+        for r in rows
+    ]
+
+
+def _volume_usage(path: Path) -> tuple[int, int]:
+    """(total, available) bytes for the volume holding the nearest existing ancestor of path."""
+    probe = path
+    while not probe.exists():
+        if probe.parent == probe:
+            probe = Path("/")
+            break
+        probe = probe.parent
+    try:
+        usage = shutil.disk_usage(probe)
+    except OSError:
+        return (0, 0)
+    return (usage.total, usage.free)
+
+
+async def storage_usage(conn: asyncpg.Connection, cfg: Config) -> StorageUsageView:
+    row = await conn.fetchrow(
+        "SELECT COALESCE(SUM(size_bytes), 0)::bigint AS files_bytes, "
+        "COUNT(*)::bigint AS n FROM files"
+    )
+    files_bytes = int(row["files_bytes"]) if row else 0
+    file_count = int(row["n"]) if row else 0
+    uploads = Path(cfg.hashcat.data_dir) / "files"
+    total, available = _volume_usage(uploads)
+    return StorageUsageView(
+        files_bytes=files_bytes,
+        file_count=file_count,
+        quota_bytes=cfg.hashcat.files_quota_bytes,
+        disk_total_bytes=total,
+        disk_available_bytes=available,
+        path=str(uploads),
+    )
+
+
+# ---- devices + telemetry (P1-08) ----
+
+
+def _dev_fields(r: asyncpg.Record) -> dict[str, object]:
+    return {
+        "name": r["name"],
+        "kind": r["kind"],
+        "temp": r["temp"] or 0,
+        "util": r["util"] or 0,
+        "mem_used": r["mem_used"] or 0,
+        "mem_total": r["mem_total"] or 0,
+        "pstate": r["pstate"] or "",
+        "power_w": r["power_w"] or 0,
+        "fan": r["fan"] or 0,
+        "clock_mhz": r["clock_mhz"] or 0,
+        "mem_clock_mhz": r["mem_clock_mhz"] or 0,
+        "hashrate": r["hashrate"] or 0,
+    }
+
+
+async def list_devices(conn: asyncpg.Connection) -> list[DeviceView]:
+    # Reads the current_devices snapshot (fed by Rust's collector in M1). The
+    # Rust in-memory fallback on an empty table has no analogue here (no live
+    # collector yet) — empty table → empty list; documented divergence.
+    rows = await conn.fetch(
+        "SELECT name, kind, temp, util, mem_used, mem_total, pstate, power_w, fan, "
+        "clock_mhz, mem_clock_mhz, hashrate FROM current_devices ORDER BY kind DESC, name"
+    )
+    return [DeviceView(**_dev_fields(r)) for r in rows]  # type: ignore[arg-type]
+
+
+async def device_history(conn: asyncpg.Connection, cfg: Config, name: str) -> list[DeviceSample]:
+    limit = max(1, min(cfg.telemetry.history_limit, 10_000))
+    rows = await conn.fetch(
+        "SELECT ts, temp, util, mem_used, mem_total, pstate, power_w, fan, "
+        "clock_mhz, mem_clock_mhz, hashrate "
+        "FROM metric_samples WHERE name = $1 ORDER BY ts DESC LIMIT $2",
+        name,
+        limit,
+    )
+    return [
+        DeviceSample(
+            ts=r["ts"],
+            temp=r["temp"] or 0,
+            util=r["util"] or 0,
+            mem_used=r["mem_used"] or 0,
+            mem_total=r["mem_total"] or 0,
+            pstate=r["pstate"] or "",
+            power_w=r["power_w"] or 0,
+            fan=r["fan"] or 0,
+            clock_mhz=r["clock_mhz"] or 0,
+            mem_clock_mhz=r["mem_clock_mhz"] or 0,
+            hashrate=r["hashrate"] or 0,
+        )
+        for r in rows
+    ]

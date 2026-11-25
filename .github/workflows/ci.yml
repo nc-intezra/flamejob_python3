@@ -13,7 +13,7 @@ jobs:
       - run: uv venv --python 3.10
       # server extra is needed so mypy can resolve FastAPI (flamejob_server imports it).
       - run: uv pip install -e '.[dev,server]'
-      - run: uv run ruff check src tests
+      - run: uv run ruff check src tests tools
       - run: uv run mypy
 
   test:

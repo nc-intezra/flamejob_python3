@@ -17,9 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from flamejob_db import create_pool
 
 from .config import Config
+from .dashboard import dashboard_router
 from .errors import install_error_handlers
 from .routes_auth import router as auth_router
+from .routes_files import router as files_router
+from .routes_hashlists import router as hashlists_router
 from .routes_jobs import router as jobs_router
+from .routes_telemetry import router as telemetry_router
 
 
 def _version() -> str:
@@ -62,6 +66,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(jobs_router)
+    app.include_router(hashlists_router)
+    app.include_router(files_router)
+    app.include_router(telemetry_router)
+    app.include_router(dashboard_router(cfg))
     return app
 
 
