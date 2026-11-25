@@ -8,6 +8,7 @@ FLAMEJOB_TEST_DSN is set (CI wires a Postgres service).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -21,6 +22,7 @@ from flamejob_db import apply
 from flamejob_server.app import create_app
 from flamejob_server.auth import api_key_hash, issue_token
 from flamejob_server.config import AuthCfg, Config, DatabaseCfg, SchedulerCfg
+from flamejob_server.crypto import Cipher
 from helpers import MIGRATIONS_DIR as _MIGRATIONS
 from helpers import swap_db as _swap_db
 
@@ -76,6 +78,31 @@ async def _seed(conn: asyncpg.Connection) -> None:
         uuid.uuid4(),
         HL,
         OWNER,
+    )
+    # Cracked hash: plain is AES-GCM encrypted under SHA-256(jwt_secret) — the
+    # dev-derivation key_from_config uses when no key file is set.
+    cipher = Cipher(hashlib.sha256(_SECRET.encode()).digest())
+    await conn.execute(
+        "INSERT INTO hashes (hashlist_id, hash, salt, plain) VALUES "
+        "($1, 'deadbeef', 'NaCl', $2), ($1, 'uncracked', NULL, NULL)",
+        HL,
+        cipher.encrypt(b"s3cr3t-plain"),
+    )
+    await conn.execute(
+        "INSERT INTO files (id, name, kind, path, size_bytes, sha256) "
+        "VALUES ($1, 'rockyou.txt', 'wordlist', '/data/files/x', 1234, $2)",
+        uuid.uuid4(),
+        "a" * 64,
+    )
+    await conn.execute(
+        "INSERT INTO current_devices (name, kind, temp, util, mem_used, mem_total, "
+        "pstate, power_w, fan, clock_mhz, mem_clock_mhz, hashrate) "
+        "VALUES ('gpu0', 'gpu', 64, 99, 8000, 24000, 'P2', 320, 55, 1800, 9500, 123456)"
+    )
+    await conn.execute(
+        "INSERT INTO metric_samples (name, kind, temp, util, hashrate, ts) VALUES "
+        "('gpu0', 'gpu', 60, 90, 120000, now() - interval '1 minute'), "
+        "('gpu0', 'gpu', 64, 99, 123456, now())"
     )
 
 
@@ -209,3 +236,65 @@ async def test_api_keys_and_capabilities(client: tuple[AsyncClient, Config]) -> 
     assert "manage_directory" in caps["superadmin"]
     assert "submit_jobs" not in caps["admin"]
     assert "view_jobs" in caps["viewer"]
+
+
+async def test_hashlists_and_cracked_decrypt(client: tuple[AsyncClient, Config]) -> None:
+    c, cfg = client
+    rh = await c.get("/hashlists", headers=_auth(cfg, [Role.OPERATOR]))
+    assert rh.status_code == 200
+    assert any(h["id"] == str(HL) and h["total"] == 10 for h in rh.json())
+
+    # ViewPlaintext (operator has it): cracked plain decrypts; the uncracked row is filtered.
+    rc = await c.get(f"/hashlists/{HL}/cracked", headers=_auth(cfg, [Role.OPERATOR]))
+    assert rc.status_code == 200
+    cracked = rc.json()
+    assert len(cracked) == 1
+    assert cracked[0]["hash"] == "deadbeef"
+    assert cracked[0]["salt"] == "NaCl"
+    assert cracked[0]["plain"] == "s3cr3t-plain"
+
+    # Viewer lacks ViewPlaintext → 403.
+    rv = await c.get(f"/hashlists/{HL}/cracked", headers=_auth(cfg, [Role.VIEWER]))
+    assert rv.status_code == 403
+
+
+async def test_files_and_usage(client: tuple[AsyncClient, Config]) -> None:
+    c, cfg = client
+    rf = await c.get("/files", headers=_auth(cfg, [Role.OPERATOR]))
+    assert rf.status_code == 200
+    files = rf.json()
+    assert any(f["name"] == "rockyou.txt" and f["kind"] == "wordlist" for f in files)
+
+    ru = await c.get("/files/usage", headers=_auth(cfg, [Role.OPERATOR]))
+    assert ru.status_code == 200
+    usage = ru.json()
+    assert usage["files_bytes"] == 1234
+    assert usage["file_count"] == 1
+    assert usage["quota_bytes"] == 0  # default unlimited
+    assert usage["disk_total_bytes"] >= 0
+
+
+async def test_devices_and_history(client: tuple[AsyncClient, Config]) -> None:
+    c, cfg = client
+    rd = await c.get("/devices", headers=_auth(cfg, [Role.VIEWER]))
+    assert rd.status_code == 200
+    devs = rd.json()
+    assert len(devs) == 1
+    assert devs[0]["name"] == "gpu0" and devs[0]["temp"] == 64 and devs[0]["hashrate"] == 123456
+
+    rhist = await c.get("/devices/gpu0/history", headers=_auth(cfg, [Role.VIEWER]))
+    assert rhist.status_code == 200
+    hist = rhist.json()
+    assert len(hist) == 2
+    # newest first
+    assert hist[0]["hashrate"] == 123456
+
+
+async def test_dashboard_served(client: tuple[AsyncClient, Config]) -> None:
+    c, _ = client
+    r = await c.get("/")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    assert '"__FJCFG__"' not in body  # placeholder substituted
+    assert '"apiPort"' in body and '"uploadLimit"' in body

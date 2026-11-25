@@ -1,0 +1,50 @@
+# flamejob M1 read-shadow routing (Phase 1).
+#
+# Routes the side-effect-free read endpoints the Python server owns in M1 to the
+# Python upstream; everything else — writes, login, the agent WS + file
+# side-channel, /agents, /metrics, /events, admin, directory — stays on Rust.
+# Rollback = delete the @py matcher + its handle block (one revert).
+#
+# Set these to your real upstreams.
+{
+    # global options as needed (email, etc.)
+}
+
+api.flamejob.example {
+    # --- endpoints Python serves in M1 (DB-only reads) ---
+    @py {
+        method GET
+        path /auth/me /auth/api-keys /auth/capabilities
+        path /jobs /jobs/history /jobs/*
+        path /hashlists /hashlists/*
+        path /files /files/usage
+        path /devices /devices/*
+        path /openapi.json /docs
+    }
+    handle @py {
+        reverse_proxy python-upstream:8443
+    }
+
+    # --- the file side-channel: served by Caddy directly, never Python (plan §5) ---
+    # (auth is the agent cert fingerprint; wire an auth subrequest to the control
+    #  plane, then serve the file from disk with sendfile.)
+    @agentfiles {
+        method GET
+        path /agent/files/*
+    }
+    handle @agentfiles {
+        # root * /var/lib/flamejob/files
+        # file_server    ; with an upstream forward_auth to validate x-agent-cert
+        reverse_proxy rust-upstream:8443
+    }
+
+    # --- everything else stays on Rust (writes, login, WS, /agents, /metrics, /events, admin) ---
+    handle {
+        reverse_proxy rust-upstream:8443
+    }
+}
+
+# The dashboard SPA (separate host/listener) → Python's "/" in M1.
+dash.flamejob.example {
+    reverse_proxy python-upstream:9443
+}
