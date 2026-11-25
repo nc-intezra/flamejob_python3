@@ -1,0 +1,23 @@
+{
+  "note": "Real Rust-produced crypto/auth artifacts (pinned crate versions). Consumed by the Python port's interop pytest.",
+  "jwt_secret": "interop-proof-secret-0123456789abcdef",
+  "user_id": "11111111-2222-3333-4444-555555555555",
+  "username": "interop.user",
+  "roles": [
+    "operator",
+    "admin"
+  ],
+  "jwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJ1c2VybmFtZSI6ImludGVyb3AudXNlciIsInJvbGVzIjpbIm9wZXJhdG9yIiwiYWRtaW4iXSwiZXhwIjoxNzk1NTc0MDUwLCJpYXQiOjE3OTU1NzA0NTB9.rbYZmZbCYE4JE6rmxXmEqgDVSwwQZz_YNzf-utpUUEw",
+  "jwt_exp": 1795574050,
+  "jwt_iat": 1795570450,
+  "aes_key_from_secret_hex": "c73c4c82ebf496f3888007810fcbc28e29a41e8a87bb0fe635a2858d3afe86e2",
+  "aes_plaintext": "hunter2 :: cracked plaintext ✓",
+  "aes_record_hex": "8e1e4dad3c1c151f622f8112f74381b40a3af36cf7668180784199b5408e705436f32b7db33d90f9d2d93140fabaa85fe419eee2250f9893463598c2",
+  "aes_explicit_key_hex": "8549678b34c82d71f988a31df2e4343a1bc32cd4d85e3f69307ffd72366bc2d9",
+  "aes_explicit_plaintext": "second-record under an explicit key-file key",
+  "aes_explicit_record_hex": "dcf02ea7d564d9df1ce7992af5f1824f699e36c2876707eb0c64bf487b6fc19b80e1fe5026e30bd61b52697d54ff95b744181997c06251aeb32db52ebed5a6872f38bade8ddf4bef",
+  "password": "correct horse battery staple",
+  "argon2_hash": "$argon2id$v=19$m=19456,t=2,p=1$uXAoIpswrH68H2u3xxfMHg$wprynzfshmnfE3W2y+Rv/NGPVEApsiKUAxPW1KIE2w4",
+  "api_key": "fj_0123456789abcdef0123456789abcdef",
+  "api_key_hash": "8c410da18dea8cefbf047092949c860a6ee61b01602583d09bd534eee247d711"
+}

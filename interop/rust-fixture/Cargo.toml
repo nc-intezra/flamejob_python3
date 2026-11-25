@@ -1,0 +1,24 @@
+[package]
+name = "interop-fixture"
+version = "0.1.0"
+edition = "2021"
+
+# Pinned to the same crate versions flamejob's Cargo.lock resolves (per the
+# security audit): these are the exact libraries that mint tokens / encrypt
+# plaintext / hash passwords in the Rust server today. The Python port must
+# interoperate with their output byte-for-byte.
+[dependencies]
+jsonwebtoken = "=9.3.1"
+argon2 = "=0.5.3"
+aes-gcm = "=0.10.3"
+sha2 = "=0.10.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+rand = "0.8"
+
+[[bin]]
+name = "gen-fixtures"
+path = "src/main.rs"

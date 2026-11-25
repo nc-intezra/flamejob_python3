@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv --python 3.10
+      - run: uv pip install -e '.[dev]'
+      - run: uv run ruff check src tests
+      - run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    # Postgres service closes the "no PG in CI" gap the Rust project has: the
+    # migration runner and (from Phase 1) the data layer run against a real DB.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: flamejob
+          POSTGRES_PASSWORD: flamejob
+          POSTGRES_DB: flamejob
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      FLAMEJOB_TEST_DSN: postgres://flamejob:flamejob@localhost:5432/flamejob
+    steps:
+      - uses: actions/checkout@v4
+      # Build the Rust interop fixtures with the SAME crate versions the server
+      # uses, then point the Python->Rust interop test at the compiled verifier.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate interop fixtures (real Rust crypto)
+        working-directory: interop/rust-fixture
+        run: |
+          cargo build --release
+          ./target/release/gen-fixtures > ../fixtures/rust_fixtures.json
+      - uses: astral-sh/setup-uv@v3
+      - run: uv venv --python 3.10
+      - run: uv pip install -e '.[dev]'
+      - name: pytest (incl. interop + Postgres migration)
+        env:
+          FLAMEJOB_RUST_BIN: ${{ github.workspace }}/interop/rust-fixture/target/release/gen-fixtures
+        run: uv run pytest -q
