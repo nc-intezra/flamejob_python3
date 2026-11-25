@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from flamejob_core import JobState, Role, TaskState
 
@@ -288,7 +288,11 @@ class GroupQuotaEntry(BaseModel):
 class Problem(BaseModel):
     """RFC 7807 problem+json error body."""
 
-    type_uri: str = Field(serialization_alias="type", validation_alias="type")
+    model_config = ConfigDict(populate_by_name=True)
+
+    type_uri: str = Field(
+        default="about:blank", serialization_alias="type", validation_alias="type"
+    )
     title: str
     status: int
     detail: str | None = None
