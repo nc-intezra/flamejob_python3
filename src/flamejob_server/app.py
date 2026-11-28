@@ -30,6 +30,7 @@ from .routes_job_writes import router as job_writes_router
 from .routes_jobs import router as jobs_router
 from .routes_preempt import router as preempt_router
 from .routes_telemetry import router as telemetry_router
+from .runtime import SchedulerSupervisor
 
 
 def _version() -> str:
@@ -47,9 +48,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         pool = await create_pool(cfg.database.dsn, cfg.database.max_connections)
         app.state.pool = pool
         app.state.cfg = cfg
+        # Start the singular control-plane brain under the advisory-lock guard.
+        # A process that loses the lock serves API-only (read replica / M1).
+        supervisor = SchedulerSupervisor(cfg)
+        app.state.scheduler = supervisor
+        await supervisor.start(pool, app.state.hub, app.state.cipher)
         try:
             yield
         finally:
+            await supervisor.stop()
             await pool.close()
 
     app = FastAPI(title="flamejob", version=_version(), lifespan=lifespan)

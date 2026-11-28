@@ -56,6 +56,7 @@ class CryptoCfg(BaseModel):
 
 
 class SchedulerCfg(BaseModel):
+    enabled: bool = True  # False → run API-only (no scheduler); see runtime.py
     chunk_size: int = 50_000_000
     max_chunks: int = 500
     runner: Literal["local", "remote"] = "local"
